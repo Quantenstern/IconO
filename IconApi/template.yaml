@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM Template for icon API
+
+Parameters:
+  Stage:
+    Description: 'Stage of the project'
+    Default: Prod
+    Type: String
+
+Globals:
+  Function:
+    Timeout: 200
+
+  Api:
+    Cors:
+      AllowMethods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+      AllowHeaders: "'Content-Type,X-Amz-Date,X-Amz-Security-Token,Authorization,X-Api-Key,X-Requested-With,Accept,Access-Control-Allow-Methods,Access-Control-Allow-Origin,Access-Control-Allow-Headers'"
+      AllowOrigin: "'*'"
+
+Resources:
+
+  IconApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-Icon-Api
+      StageName: !Ref Stage
+      EndpointConfiguration:
+        Type: REGIONAL
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Sub '{{resolve:ssm:CognitoUserPoolArn-${Stage}:1}}'
+
+  MyMapping:
+    Type: 'AWS::ApiGateway::BasePathMapping'
+    DependsOn:
+      - IconApi
+    Properties:
+      BasePath: !Ref Stage
+      DomainName: icon-api.weareunit.ai
+      RestApiId: !Ref IconApi
+      Stage : !Ref IconApi.Stage
+
+  PerformanceFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: handler/
+      Handler: handler.lambda_handler
+      Runtime: python3.7
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub '{{resolve:ssm:SnapTableName-${Stage}:1}}'
+      Policies:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Action: dynamodb:*
+            Resource: !Sub '{{resolve:ssm:SnapTableName-ARN-${Stage}:1}}'
+      Events:
+        GetPerformanceAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IconApi
+            Path: /v1/get_performance
+            Method: get
+            Auth:
+              Authorizer: CognitoAuthorizer
+        Options:
+          Type: Api
+          Properties:
+            RestApiId: !Ref IconApi
+            Path: /v1/get_performance
+            Method: options
+
+  APIURL:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub APIURL-${Stage}
+      Value: !Sub https://${IconApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/
+      Type: String
+
+Outputs:
+  PerformanceFunctionArn:
+    Description: PerformanceFunction.Arn
+    Value: !GetAtt PerformanceFunction.Arn
